@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PutMan - Modern API Testing Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="dark-theme">
+  <div class="app-layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="url(#orange-grad)" fill="url(#orange-grad)" />
+              <defs>
+                <linearGradient id="orange-grad" x1="3" y1="2" x2="21" y2="22">
+                  <stop stop-color="#FF6C37" />
+                  <stop offset="1" stop-color="#FF9259" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <span class="brand-name">PutMan</span>
+          <span class="badge-tag">MVP</span>
+        </div>
+      </div>
+
+      <div class="sidebar-tabs">
+        <button type="button" class="sidebar-tab active" data-sidebar-tab="history">Lịch sử (<span
+            id="history-count">0</span>)</button>
+        <button type="button" class="sidebar-tab" data-sidebar-tab="presets">Mẫu API</button>
+      </div>
+
+      <div class="sidebar-search">
+        <input type="text" id="history-search" placeholder="Tìm kiếm request...">
+      </div>
+
+      <div class="sidebar-content" id="history-container">
+        <div class="sidebar-actions">
+          <button type="button" class="btn-ghost-sm" id="btn-clear-history">Xoá toàn bộ</button>
+        </div>
+        <ul class="history-list" id="history-list"></ul>
+        <div class="empty-notice" id="history-empty">Chưa có lịch sử request nào</div>
+      </div>
+
+      <div class="sidebar-content hidden" id="presets-container">
+        <ul class="presets-list" id="presets-list"></ul>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="mode-switch-wrapper">
+          <span class="mode-label">Chế độ Proxy</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-proxy-mode" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="top-nav">
+        <button type="button" class="btn-icon" id="toggle-sidebar" title="Đóng/Mở thanh bên">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+        <div class="nav-title-group">
+          <input type="text" id="request-title" class="request-name-input" value="Untitled Request"
+            placeholder="Tên Request">
+        </div>
+        <div class="nav-actions">
+          <button type="button" class="btn-outline-sm" id="btn-reset-req" title="Làm mới form">Mới</button>
+        </div>
+      </header>
+
+      <section class="request-url-section">
+        <div class="url-bar-container">
+          <div class="method-select-wrapper">
+            <select id="http-method" class="method-select method-get">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+              <option value="HEAD">HEAD</option>
+              <option value="OPTIONS">OPTIONS</option>
+            </select>
+          </div>
+          <input type="text" id="request-url" class="url-input"
+            placeholder="Nhập URL (ví dụ: https://jsonplaceholder.typicode.com/posts/1)"
+            value="https://jsonplaceholder.typicode.com/posts/1" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn-send" id="btn-send">
+            <span class="btn-send-text">Gửi</span>
+            <span class="btn-send-spinner hidden"></span>
+            <span class="kbd-shortcut">⌘↵</span>
+          </button>
+        </div>
+      </section>
+
+      <div class="workspace-grid">
+        <section class="panel-section request-panel">
+          <div class="tab-header">
+            <div class="tab-group">
+              <button type="button" class="tab-btn active" data-tab="tab-params">Params <span class="tab-badge"
+                  id="badge-params">0</span></button>
+              <button type="button" class="tab-btn" data-tab="tab-headers">Headers <span class="tab-badge"
+                  id="badge-headers">0</span></button>
+              <button type="button" class="tab-btn" data-tab="tab-body">Body <span class="tab-dot hidden"
+                  id="dot-body"></span></button>
+              <button type="button" class="tab-btn" data-tab="tab-auth">Auth <span class="tab-dot hidden"
+                  id="dot-auth"></span></button>
+            </div>
+          </div>
+
+          <div class="tab-contents">
+            <div class="tab-pane active" id="tab-params">
+              <div class="table-toolbar">
+                <span class="toolbar-title">Query Parameters</span>
+                <button type="button" class="btn-ghost-sm" id="btn-add-param">+ Thêm tham số</button>
+              </div>
+              <div class="kv-table-wrapper">
+                <table class="kv-table" id="params-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 38px;"></th>
+                      <th>Key</th>
+                      <th>Value</th>
+                      <th>Mô tả</th>
+                      <th style="width: 44px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="params-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-pane" id="tab-headers">
+              <div class="table-toolbar">
+                <span class="toolbar-title">Request Headers</span>
+                <button type="button" class="btn-ghost-sm" id="btn-add-header">+ Thêm Header</button>
+              </div>
+              <div class="kv-table-wrapper">
+                <table class="kv-table" id="headers-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 38px;"></th>
+                      <th>Key</th>
+                      <th>Value</th>
+                      <th>Mô tả</th>
+                      <th style="width: 44px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="headers-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-pane" id="tab-body">
+              <div class="body-type-selector">
+                <label class="radio-label">
+                  <input type="radio" name="body-type" value="none" checked> None
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="body-type" value="json"> JSON
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="body-type" value="form-data"> form-data
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="body-type" value="x-www-form-urlencoded"> x-www-form-urlencoded
+                </label>
+                <label class="radio-label">
+                  <input type="radio" name="body-type" value="raw"> Raw text
+                </label>
+              </div>
+
+              <div class="body-content-panel">
+                <div class="body-editor-wrap hidden" id="body-json-wrap">
+                  <div class="editor-subbar">
+                    <span class="subbar-info">Content-Type: application/json</span>
+                    <div class="subbar-actions">
+                      <button type="button" class="btn-ghost-sm" id="btn-beautify-json">Prettify JSON</button>
+                      <button type="button" class="btn-ghost-sm" id="btn-clear-json">Xoá</button>
+                    </div>
+                  </div>
+                  <textarea id="json-editor" class="code-textarea"
+                    placeholder="{\n  &quot;title&quot;: &quot;foo&quot;,\n  &quot;body&quot;: &quot;bar&quot;,\n  &quot;userId&quot;: 1\n}"
+                    spellcheck="false"></textarea>
+                </div>
+
+                <div class="body-editor-wrap hidden" id="body-raw-wrap">
+                  <div class="editor-subbar">
+                    <span class="subbar-info">Raw Content</span>
+                  </div>
+                  <textarea id="raw-editor" class="code-textarea" placeholder="Nội dung văn bản thô..."
+                    spellcheck="false"></textarea>
+                </div>
+
+                <div class="body-editor-wrap hidden" id="body-formdata-wrap">
+                  <div class="table-toolbar">
+                    <span class="toolbar-title">Multipart Form Data</span>
+                    <button type="button" class="btn-ghost-sm" id="btn-add-formdata">+ Thêm trường</button>
+                  </div>
+                  <div class="kv-table-wrapper">
+                    <table class="kv-table" id="formdata-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 38px;"></th>
+                          <th>Key</th>
+                          <th>Value</th>
+                          <th style="width: 44px;"></th>
+                        </tr>
+                      </thead>
+                      <tbody id="formdata-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="body-editor-wrap hidden" id="body-urlencoded-wrap">
+                  <div class="table-toolbar">
+                    <span class="toolbar-title">URL Encoded Form</span>
+                    <button type="button" class="btn-ghost-sm" id="btn-add-urlencoded">+ Thêm trường</button>
+                  </div>
+                  <div class="kv-table-wrapper">
+                    <table class="kv-table" id="urlencoded-table">
+                      <thead>
+                        <tr>
+                          <th style="width: 38px;"></th>
+                          <th>Key</th>
+                          <th>Value</th>
+                          <th style="width: 44px;"></th>
+                        </tr>
+                      </thead>
+                      <tbody id="urlencoded-rows"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="body-editor-wrap" id="body-none-wrap">
+                  <div class="empty-state-notice">Request này không truyền kèm Body.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-pane" id="tab-auth">
+              <div class="auth-config-wrap">
+                <div class="auth-type-row">
+                  <label for="auth-type" class="form-label">Loại xác thực:</label>
+                  <select id="auth-type" class="form-select">
+                    <option value="none">No Auth</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="basic">Basic Auth</option>
+                    <option value="apikey">API Key</option>
+                  </select>
+                </div>
+
+                <div class="auth-fields" id="auth-bearer-fields">
+                  <div class="form-group">
+                    <label for="auth-token" class="form-label">Token</label>
+                    <input type="text" id="auth-token" class="form-input" placeholder="Bearer eyJhbGciOi...">
+                  </div>
+                </div>
+
+                <div class="auth-fields hidden" id="auth-basic-fields">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="auth-username" class="form-label">Username</label>
+                      <input type="text" id="auth-username" class="form-input" placeholder="Username">
+                    </div>
+                    <div class="form-group">
+                      <label for="auth-password" class="form-label">Password</label>
+                      <input type="password" id="auth-password" class="form-input" placeholder="Password">
+                    </div>
+                  </div>
+                </div>
+
+                <div class="auth-fields hidden" id="auth-apikey-fields">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="auth-apikey-key" class="form-label">Key Name</label>
+                      <input type="text" id="auth-apikey-key" class="form-input" placeholder="X-API-Key hoặc api_key">
+                    </div>
+                    <div class="form-group">
+                      <label for="auth-apikey-val" class="form-label">Value</label>
+                      <input type="text" id="auth-apikey-val" class="form-input" placeholder="Giá trị token/key">
+                    </div>
+                    <div class="form-group">
+                      <label for="auth-apikey-target" class="form-label">Thêm vào</label>
+                      <select id="auth-apikey-target" class="form-select">
+                        <option value="header">Header</option>
+                        <option value="query">Query Params</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-section response-panel">
+          <div class="response-header">
+            <div class="response-status-info">
+              <span class="response-title">Phản hồi</span>
+              <div class="status-metrics hidden" id="response-metrics">
+                <span class="status-code-badge" id="res-status-badge">200 OK</span>
+                <span class="metric-item"><span class="metric-icon">⏱</span> <span id="res-time-val">0 ms</span></span>
+                <span class="metric-item"><span class="metric-icon">📦</span> <span id="res-size-val">0 B</span></span>
+              </div>
+            </div>
+            <div class="response-actions">
+              <button type="button" class="btn-ghost-sm" id="btn-copy-response" title="Sao chép body">Sao chép</button>
+              <button type="button" class="btn-ghost-sm" id="btn-download-response" title="Tải về file">Tải
+                xuống</button>
+              <button type="button" class="btn-ghost-sm" id="btn-clear-response" title="Xoá kết quả">Xoá</button>
+            </div>
+          </div>
+
+          <div class="tab-header">
+            <div class="tab-group">
+              <button type="button" class="tab-btn active" data-res-tab="res-tab-body">Body</button>
+              <button type="button" class="tab-btn" data-res-tab="res-tab-headers">Headers <span class="tab-badge"
+                  id="badge-res-headers">0</span></button>
+              <button type="button" class="tab-btn" data-res-tab="res-tab-preview">Preview HTML/Ảnh</button>
+            </div>
+            <div class="response-body-format-group" id="format-group">
+              <button type="button" class="format-btn active" data-format="pretty">Pretty</button>
+              <button type="button" class="format-btn" data-format="raw">Raw</button>
+            </div>
+          </div>
+
+          <div class="tab-contents response-tab-contents">
+            <div class="res-tab-pane active" id="res-tab-body">
+              <div class="response-empty" id="res-empty-state">
+                <div class="empty-icon">⚡</div>
+                <div class="empty-title">Chưa có phản hồi</div>
+                <div class="empty-desc">Nhấn <strong>Gửi</strong> hoặc tổ hợp <code>Ctrl + Enter</code> để thực thi API
+                  request.</div>
+              </div>
+
+              <div class="response-loading hidden" id="res-loading-state">
+                <div class="spinner"></div>
+                <span>Đang gửi request...</span>
+              </div>
+
+              <div class="response-error hidden" id="res-error-state">
+                <div class="error-badge">Lỗi kết nối</div>
+                <div class="error-message" id="res-error-message"></div>
+              </div>
+
+              <div class="response-code-container hidden" id="res-code-container">
+                <pre class="response-code-block"><code id="response-code"></code></pre>
+              </div>
+            </div>
+
+            <div class="res-tab-pane" id="res-tab-headers">
+              <div class="kv-table-wrapper">
+                <table class="kv-table" id="res-headers-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 280px;">Header</th>
+                      <th>Value</th>
+                    </tr>
+                  </thead>
+                  <tbody id="res-headers-rows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="res-tab-pane" id="res-tab-preview">
+              <iframe id="res-preview-frame" class="preview-iframe" sandbox="allow-same-origin"></iframe>
+              <div id="res-preview-image-wrap" class="preview-img-wrap hidden">
+                <img id="res-preview-image" alt="Response preview">
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+
+</html>
