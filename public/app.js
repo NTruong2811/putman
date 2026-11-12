@@ -19,6 +19,7 @@ const state = {
     apiTarget: 'header'
   },
   useProxy: true,
+  timeout: 300,
   lastResponse: null,
   activeFormat: 'pretty',
   history: []
@@ -166,6 +167,7 @@ const el = {
   btnCancelCurlModal: document.getElementById('btn-cancel-curl-modal'),
   btnConfirmImportCurl: document.getElementById('btn-confirm-import-curl'),
   curlInputTextarea: document.getElementById('curl-input-textarea'),
+  requestTimeout: document.getElementById('request-timeout'),
   toast: document.getElementById('toast')
 };
 
@@ -178,6 +180,9 @@ function initApp() {
   updateBadges();
   renderParams();
   renderHeaders();
+  if (el.requestTimeout) {
+    el.requestTimeout.value = String(state.timeout);
+  }
 }
 
 function showToast(message) {
@@ -230,6 +235,33 @@ function setupEventListeners() {
   el.reqTitle.addEventListener('input', () => {
     state.name = el.reqTitle.value || 'Untitled Request';
   });
+
+  if (el.requestTimeout) {
+    el.requestTimeout.addEventListener('input', () => {
+      const raw = el.requestTimeout.value.trim();
+      if (raw !== '') {
+        const val = parseFloat(raw);
+        if (!Number.isNaN(val) && val >= 0) {
+          state.timeout = val;
+        }
+      }
+    });
+
+    const normalizeTimeout = () => {
+      const raw = el.requestTimeout.value.trim();
+      const val = parseFloat(raw);
+      if (raw === '' || Number.isNaN(val) || val < 0) {
+        state.timeout = 300;
+        el.requestTimeout.value = '300';
+      } else {
+        state.timeout = val;
+        el.requestTimeout.value = String(val);
+      }
+    };
+
+    el.requestTimeout.addEventListener('change', normalizeTimeout);
+    el.requestTimeout.addEventListener('blur', normalizeTimeout);
+  }
 
   el.btnSend.addEventListener('click', executeRequest);
 
@@ -544,6 +576,7 @@ function parseCurlCommand(str) {
   const dataParts = [];
   let bodyType = 'none';
   let basicAuth = null;
+  let timeout = null;
 
   const flagsWithValue = new Set([
     '-X', '--request',
@@ -617,6 +650,11 @@ function parseCurlCommand(str) {
         bodyType = 'x-www-form-urlencoded';
       } else if (['--data', '--data-raw', '--data-binary', '--data-ascii'].includes(opt)) {
         dataParts.push(val);
+      } else if (opt === '--max-time') {
+        const parsedSec = parseFloat(val);
+        if (!Number.isNaN(parsedSec) && parsedSec >= 0) {
+          timeout = parsedSec;
+        }
       }
       i++;
       continue;
@@ -731,6 +769,14 @@ function parseCurlCommand(str) {
       }
     } else if (token.startsWith('-d') && token.length > 2) {
       dataParts.push(token.substring(2));
+    } else if (token === '-m' || token === '--max-time') {
+      i++;
+      if (i < tokens.length) {
+        const parsedSec = parseFloat(tokens[i]);
+        if (!Number.isNaN(parsedSec) && parsedSec >= 0) {
+          timeout = parsedSec;
+        }
+      }
     } else if (flagsWithValue.has(token)) {
       i++;
     } else if (token.startsWith('-')) {
@@ -815,7 +861,8 @@ function parseCurlCommand(str) {
     rawBody,
     formData,
     urlEncoded,
-    basicAuth
+    basicAuth,
+    timeout
   };
 }
 
@@ -884,6 +931,11 @@ function applyCurlCommand(rawText) {
     el.authApikeyFields.classList.add('hidden');
   }
 
+  state.timeout = parsed.timeout !== null && parsed.timeout !== undefined ? parsed.timeout : 300;
+  if (el.requestTimeout) {
+    el.requestTimeout.value = String(state.timeout);
+  }
+
   updateBadges();
 
   if (state.bodyType !== 'none') {
@@ -917,6 +969,10 @@ function generateCurlCommand() {
 
   if (reqData.body && !['GET', 'HEAD'].includes(reqData.method)) {
     parts.push(`-d '${String(reqData.body).replace(/'/g, "'\\''")}'`);
+  }
+
+  if (state.timeout !== 300 && state.timeout > 0) {
+    parts.push(`--max-time ${state.timeout}`);
   }
 
   return parts.join(' \\\n  ');
@@ -1320,11 +1376,16 @@ function prepareRequestPayload() {
     }
   }
 
+  const rawTimeout = el.requestTimeout ? parseFloat(el.requestTimeout.value.trim()) : state.timeout;
+  const timeoutSec = !Number.isNaN(rawTimeout) && rawTimeout >= 0 ? rawTimeout : 300;
+  state.timeout = timeoutSec;
+
   return {
     url: targetUrl,
     method,
     headers: headerObj,
-    body: finalBody
+    body: finalBody,
+    timeoutMs: Math.round(timeoutSec * 1000)
   };
 }
 
@@ -1358,7 +1419,33 @@ async function executeRequest() {
       if (reqData.body && !['GET', 'HEAD'].includes(reqData.method)) {
         fetchOpts.body = reqData.body;
       }
-      const directRes = await fetch(reqData.url, fetchOpts);
+
+      const controller = new AbortController();
+      let timedOut = false;
+      const timeoutId = reqData.timeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, reqData.timeoutMs)
+        : null;
+      fetchOpts.signal = controller.signal;
+
+      let directRes;
+      let bodyText;
+      try {
+        directRes = await fetch(reqData.url, fetchOpts);
+        bodyText = await directRes.text();
+      } catch (directErr) {
+        if (timedOut || directErr.name === 'AbortError') {
+          const timeoutErr = new Error(`Request timed out (${Math.round(reqData.timeoutMs / 100) / 10}s limit)`);
+          timeoutErr.name = 'TimeoutError';
+          throw timeoutErr;
+        }
+        throw directErr;
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+
       const duration = Math.round(performance.now() - startTime);
 
       const resHeaders = {};
@@ -1366,7 +1453,6 @@ async function executeRequest() {
         resHeaders[k] = v;
       });
 
-      const bodyText = await directRes.text();
       result = {
         status: directRes.status,
         statusText: directRes.statusText,
@@ -1387,7 +1473,7 @@ async function executeRequest() {
     const errResult = {
       error: true,
       status: 0,
-      statusText: 'Client Error',
+      statusText: err.name === 'TimeoutError' ? 'Timeout' : 'Client Error',
       message: err.message || 'Không thể kết nối đến máy chủ',
       time: duration,
       size: 0,
@@ -1605,7 +1691,8 @@ function addToHistory(req, res) {
       rawBody: state.rawBody,
       formData: JSON.parse(JSON.stringify(state.formData)),
       urlEncoded: JSON.parse(JSON.stringify(state.urlEncoded)),
-      auth: JSON.parse(JSON.stringify(state.auth))
+      auth: JSON.parse(JSON.stringify(state.auth)),
+      timeout: state.timeout
     }
   };
 
@@ -1742,6 +1829,11 @@ function applyPreset(preset) {
     state.jsonBody = '';
   }
 
+  state.timeout = preset.timeout !== undefined ? preset.timeout : 300;
+  if (el.requestTimeout) {
+    el.requestTimeout.value = String(state.timeout);
+  }
+
   updateBadges();
   showToast(`Đã áp dụng mẫu: ${preset.name}`);
 }
@@ -1793,6 +1885,11 @@ function loadSnapshot(snap) {
     el.authBearerFields.classList.toggle('hidden', state.auth.type !== 'bearer');
     el.authBasicFields.classList.toggle('hidden', state.auth.type !== 'basic');
     el.authApikeyFields.classList.toggle('hidden', state.auth.type !== 'apikey');
+  }
+
+  state.timeout = snap.timeout !== undefined ? snap.timeout : 300;
+  if (el.requestTimeout) {
+    el.requestTimeout.value = String(state.timeout);
   }
 
   updateBadges();
@@ -1847,6 +1944,11 @@ function resetForm() {
   el.authBearerFields.classList.add('hidden');
   el.authBasicFields.classList.add('hidden');
   el.authApikeyFields.classList.add('hidden');
+
+  state.timeout = 300;
+  if (el.requestTimeout) {
+    el.requestTimeout.value = '300';
+  }
 
   clearResponse();
   updateBadges();
