@@ -81,6 +81,8 @@
             placeholder="Tên Request">
         </div>
         <div class="nav-actions">
+          <button type="button" class="btn-outline-sm" id="btn-import-curl" title="Import cURL command">Import cURL</button>
+          <button type="button" class="btn-outline-sm" id="btn-copy-curl" title="Sao chép cURL của request này">Copy cURL</button>
           <button type="button" class="btn-outline-sm" id="btn-reset-req" title="Làm mới form">Mới</button>
         </div>
       </header>
@@ -389,6 +391,25 @@
         </section>
       </div>
     </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="curl-modal-backdrop">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 class="modal-title">Import cURL</h3>
+        <button type="button" class="modal-close" id="btn-close-curl-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">Dán lệnh cURL từ terminal, Postman hoặc DevTools để tự động điền toàn bộ Request.</p>
+        <textarea id="curl-input-textarea" class="modal-textarea" placeholder="curl --location 'https://api.example.com/posts' \
+  --header 'Content-Type: application/json' \
+  --data '{ &quot;title&quot;: &quot;foo&quot; }'" spellcheck="false"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-ghost-sm" id="btn-cancel-curl-modal">Huỷ</button>
+        <button type="button" class="btn-send" id="btn-confirm-import-curl" style="padding: 6px 16px; font-size: 12px; height: 32px;">Import</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>

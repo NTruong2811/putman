@@ -159,6 +159,13 @@ const el = {
   resPreviewFrame: document.getElementById('res-preview-frame'),
   resPreviewImageWrap: document.getElementById('res-preview-image-wrap'),
   resPreviewImage: document.getElementById('res-preview-image'),
+  btnImportCurl: document.getElementById('btn-import-curl'),
+  btnCopyCurl: document.getElementById('btn-copy-curl'),
+  curlModalBackdrop: document.getElementById('curl-modal-backdrop'),
+  btnCloseCurlModal: document.getElementById('btn-close-curl-modal'),
+  btnCancelCurlModal: document.getElementById('btn-cancel-curl-modal'),
+  btnConfirmImportCurl: document.getElementById('btn-confirm-import-curl'),
+  curlInputTextarea: document.getElementById('curl-input-textarea'),
   toast: document.getElementById('toast')
 };
 
@@ -200,8 +207,21 @@ function setupEventListeners() {
     }
   });
 
+  el.urlInput.addEventListener('paste', (e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text');
+    if (text && isCurlCommand(text)) {
+      e.preventDefault();
+      applyCurlCommand(text);
+    }
+  });
+
   el.urlInput.addEventListener('input', () => {
-    state.url = el.urlInput.value;
+    const val = el.urlInput.value;
+    if (isCurlCommand(val)) {
+      applyCurlCommand(val);
+      return;
+    }
+    state.url = val;
     parseUrlParams();
     renderParams();
     updateBadges();
@@ -387,6 +407,519 @@ function setupEventListeners() {
   });
 
   el.btnClearRes.addEventListener('click', clearResponse);
+
+  function openCurlModal() {
+    el.curlModalBackdrop.classList.remove('hidden');
+    el.curlInputTextarea.value = '';
+    el.curlInputTextarea.focus();
+  }
+
+  function closeCurlModal() {
+    el.curlModalBackdrop.classList.add('hidden');
+    el.curlInputTextarea.value = '';
+  }
+
+  if (el.btnImportCurl) {
+    el.btnImportCurl.addEventListener('click', openCurlModal);
+  }
+  if (el.btnCloseCurlModal) {
+    el.btnCloseCurlModal.addEventListener('click', closeCurlModal);
+  }
+  if (el.btnCancelCurlModal) {
+    el.btnCancelCurlModal.addEventListener('click', closeCurlModal);
+  }
+  if (el.curlModalBackdrop) {
+    el.curlModalBackdrop.addEventListener('click', (e) => {
+      if (e.target === el.curlModalBackdrop) {
+        closeCurlModal();
+      }
+    });
+  }
+  if (el.btnConfirmImportCurl) {
+    el.btnConfirmImportCurl.addEventListener('click', () => {
+      const text = el.curlInputTextarea.value.trim();
+      if (!text) {
+        showToast('Vui lòng nhập lệnh cURL');
+        return;
+      }
+      const success = applyCurlCommand(text);
+      if (success) {
+        closeCurlModal();
+      } else {
+        showToast('Không thể phân tích cú pháp cURL này');
+      }
+    });
+  }
+  if (el.btnCopyCurl) {
+    el.btnCopyCurl.addEventListener('click', () => {
+      const curlCmd = generateCurlCommand();
+      navigator.clipboard.writeText(curlCmd)
+        .then(() => showToast('Đã sao chép cURL vào clipboard'))
+        .catch(() => showToast('Lỗi khi sao chép'));
+    });
+  }
+
+  document.addEventListener('paste', (e) => {
+    const active = document.activeElement;
+    const isEditingText = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+    if (isEditingText && active !== el.urlInput && active !== el.curlInputTextarea) {
+      return;
+    }
+    if (active === el.urlInput || active === el.curlInputTextarea) {
+      return;
+    }
+    const text = (e.clipboardData || window.clipboardData)?.getData('text');
+    if (text && isCurlCommand(text)) {
+      e.preventDefault();
+      applyCurlCommand(text);
+    }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && el.curlModalBackdrop && !el.curlModalBackdrop.classList.contains('hidden')) {
+      closeCurlModal();
+    }
+  });
+}
+
+function isCurlCommand(str) {
+  if (!str || typeof str !== 'string') return false;
+  const s = str.trim();
+  if (/^(?:https?:\/\/)?curl\b/i.test(s)) return true;
+  if ((s.includes('--header') || s.includes('-H ') || s.includes('--data') || s.includes('-d ')) &&
+      (s.includes('http://') || s.includes('https://') || s.includes('--url'))) {
+    return true;
+  }
+  return false;
+}
+
+function parseCurlCommand(str) {
+  if (!str || typeof str !== 'string') return null;
+  const trimmed = str.trim();
+
+  if (!isCurlCommand(trimmed)) {
+    return null;
+  }
+
+  const cleanStr = trimmed
+    .replace(/^\s*https?:\/\/curl\b/i, 'curl')
+    .replace(/\\\r?\n/g, ' ')
+    .replace(/\^\r?\n/g, ' ')
+    .replace(/`\r?\n/g, ' ');
+
+  const tokens = [];
+  let curr = '';
+  let inSingle = false;
+  let inDouble = false;
+  let escape = false;
+
+  for (let i = 0; i < cleanStr.length; i++) {
+    const c = cleanStr[i];
+    if (escape) {
+      curr += c;
+      escape = false;
+    } else if (c === '\\' && !inSingle) {
+      escape = true;
+    } else if (c === "'" && !inDouble) {
+      inSingle = !inSingle;
+    } else if (c === '"' && !inSingle) {
+      inDouble = !inDouble;
+    } else if (/\s/.test(c) && !inSingle && !inDouble) {
+      if (curr.length > 0) {
+        tokens.push(curr);
+        curr = '';
+      }
+    } else {
+      curr += c;
+    }
+  }
+  if (curr.length > 0) tokens.push(curr);
+
+  let method = '';
+  let url = '';
+  const headers = [];
+  const params = [];
+  const formData = [];
+  const urlEncoded = [];
+  const dataParts = [];
+  let bodyType = 'none';
+  let basicAuth = null;
+
+  const flagsWithValue = new Set([
+    '-X', '--request',
+    '--url',
+    '-H', '--header',
+    '-d', '--data', '--data-raw', '--data-binary', '--data-ascii', '--data-urlencode',
+    '-F', '--form',
+    '-u', '--user',
+    '-A', '--user-agent',
+    '-b', '--cookie',
+    '-c', '--cookie-jar',
+    '-e', '--referer',
+    '-m', '--max-time',
+    '--connect-timeout',
+    '-o', '--output',
+    '--cacert', '--capath', '--cert', '--key', '--pass',
+    '-x', '--proxy', '--proxy-user',
+    '--resolve',
+    '--retry', '--retry-delay', '--retry-max-time'
+  ]);
+
+  let i = 0;
+  if (tokens.length > 0 && tokens[0].toLowerCase() === 'curl') {
+    i = 1;
+  }
+
+  while (i < tokens.length) {
+    const token = tokens[i];
+
+    if (token.startsWith('--') && token.includes('=')) {
+      const eqIdx = token.indexOf('=');
+      const opt = token.substring(0, eqIdx);
+      const val = token.substring(eqIdx + 1);
+
+      if (opt === '--request') {
+        method = val.toUpperCase().replace(/['"]/g, '');
+      } else if (opt === '--url') {
+        url = val.replace(/^['"]|['"]$/g, '');
+      } else if (opt === '--header') {
+        const colonIdx = val.indexOf(':');
+        if (colonIdx !== -1) {
+          headers.push({
+            enabled: true,
+            key: val.substring(0, colonIdx).trim(),
+            value: val.substring(colonIdx + 1).trim(),
+            desc: ''
+          });
+        }
+      } else if (opt === '--user') {
+        const colonIdx = val.indexOf(':');
+        if (colonIdx !== -1) {
+          basicAuth = { username: val.substring(0, colonIdx), password: val.substring(colonIdx + 1) };
+        } else {
+          basicAuth = { username: val, password: '' };
+        }
+      } else if (opt === '--form') {
+        const eq = val.indexOf('=');
+        if (eq !== -1) {
+          formData.push({ enabled: true, key: val.substring(0, eq).trim(), value: val.substring(eq + 1).trim() });
+        } else {
+          formData.push({ enabled: true, key: val.trim(), value: '' });
+        }
+        bodyType = 'form-data';
+      } else if (opt === '--data-urlencode') {
+        const eq = val.indexOf('=');
+        if (eq !== -1) {
+          urlEncoded.push({ enabled: true, key: val.substring(0, eq).trim(), value: val.substring(eq + 1).trim() });
+        } else {
+          urlEncoded.push({ enabled: true, key: val.trim(), value: '' });
+        }
+        bodyType = 'x-www-form-urlencoded';
+      } else if (['--data', '--data-raw', '--data-binary', '--data-ascii'].includes(opt)) {
+        dataParts.push(val);
+      }
+      i++;
+      continue;
+    }
+
+    if (token === '-X' || token === '--request') {
+      i++;
+      if (i < tokens.length) method = tokens[i].toUpperCase().replace(/['"]/g, '');
+    } else if (token.startsWith('-X') && token.length > 2) {
+      method = token.substring(2).toUpperCase().replace(/['"]/g, '');
+    } else if (token === '--url') {
+      i++;
+      if (i < tokens.length) url = tokens[i].replace(/^['"]|['"]$/g, '');
+    } else if (token === '-H' || token === '--header') {
+      i++;
+      if (i < tokens.length) {
+        const h = tokens[i];
+        const colonIdx = h.indexOf(':');
+        if (colonIdx !== -1) {
+          headers.push({
+            enabled: true,
+            key: h.substring(0, colonIdx).trim(),
+            value: h.substring(colonIdx + 1).trim(),
+            desc: ''
+          });
+        }
+      }
+    } else if (token.startsWith('-H') && token.length > 2) {
+      const h = token.substring(2);
+      const colonIdx = h.indexOf(':');
+      if (colonIdx !== -1) {
+        headers.push({
+          enabled: true,
+          key: h.substring(0, colonIdx).trim(),
+          value: h.substring(colonIdx + 1).trim(),
+          desc: ''
+        });
+      }
+    } else if (token === '-u' || token === '--user') {
+      i++;
+      if (i < tokens.length) {
+        const u = tokens[i];
+        const colonIdx = u.indexOf(':');
+        if (colonIdx !== -1) {
+          basicAuth = {
+            username: u.substring(0, colonIdx),
+            password: u.substring(colonIdx + 1)
+          };
+        } else {
+          basicAuth = { username: u, password: '' };
+        }
+      }
+    } else if (token === '-A' || token === '--user-agent') {
+      i++;
+      if (i < tokens.length) {
+        headers.push({ enabled: true, key: 'User-Agent', value: tokens[i], desc: '' });
+      }
+    } else if (token === '-b' || token === '--cookie') {
+      i++;
+      if (i < tokens.length) {
+        headers.push({ enabled: true, key: 'Cookie', value: tokens[i], desc: '' });
+      }
+    } else if (token === '-e' || token === '--referer') {
+      i++;
+      if (i < tokens.length) {
+        headers.push({ enabled: true, key: 'Referer', value: tokens[i], desc: '' });
+      }
+    } else if (token === '-I' || token === '--head') {
+      method = 'HEAD';
+    } else if (token === '-F' || token === '--form') {
+      i++;
+      if (i < tokens.length) {
+        const f = tokens[i];
+        const eqIdx = f.indexOf('=');
+        if (eqIdx !== -1) {
+          formData.push({
+            enabled: true,
+            key: f.substring(0, eqIdx).trim(),
+            value: f.substring(eqIdx + 1).trim()
+          });
+        } else {
+          formData.push({ enabled: true, key: f.trim(), value: '' });
+        }
+        bodyType = 'form-data';
+      }
+    } else if (token === '--data-urlencode') {
+      i++;
+      if (i < tokens.length) {
+        const d = tokens[i];
+        const eqIdx = d.indexOf('=');
+        if (eqIdx !== -1) {
+          urlEncoded.push({
+            enabled: true,
+            key: d.substring(0, eqIdx).trim(),
+            value: d.substring(eqIdx + 1).trim()
+          });
+        } else {
+          urlEncoded.push({ enabled: true, key: d.trim(), value: '' });
+        }
+        bodyType = 'x-www-form-urlencoded';
+      }
+    } else if (
+      token === '-d' ||
+      token === '--data' ||
+      token === '--data-raw' ||
+      token === '--data-binary' ||
+      token === '--data-ascii'
+    ) {
+      i++;
+      if (i < tokens.length) {
+        dataParts.push(tokens[i]);
+      }
+    } else if (token.startsWith('-d') && token.length > 2) {
+      dataParts.push(token.substring(2));
+    } else if (flagsWithValue.has(token)) {
+      i++;
+    } else if (token.startsWith('-')) {
+    } else {
+      if (!url) {
+        url = token.replace(/^['"]|['"]$/g, '');
+      } else if (!url.startsWith('http://') && !url.startsWith('https://') &&
+                 (token.startsWith('http://') || token.startsWith('https://'))) {
+        url = token.replace(/^['"]|['"]$/g, '');
+      }
+    }
+
+    i++;
+  }
+
+  let jsonBody = '';
+  let rawBody = '';
+
+  if (bodyType === 'none' && dataParts.length > 0) {
+    const rawData = dataParts.join('&');
+    const cTypeHeader = headers.find(h => h.key.toLowerCase() === 'content-type');
+    const cType = cTypeHeader ? cTypeHeader.value.toLowerCase() : '';
+
+    let isJson = false;
+    try {
+      const parsed = JSON.parse(rawData);
+      jsonBody = JSON.stringify(parsed, null, 2);
+      isJson = true;
+    } catch {
+      isJson = false;
+    }
+
+    if (isJson || cType.includes('application/json')) {
+      bodyType = 'json';
+      jsonBody = jsonBody || rawData;
+    } else if (cType.includes('application/x-www-form-urlencoded')) {
+      bodyType = 'x-www-form-urlencoded';
+      const parts = rawData.split('&');
+      parts.forEach(p => {
+        const [k, v] = p.split('=');
+        if (k) {
+          urlEncoded.push({
+            enabled: true,
+            key: decodeURIComponent(k.replace(/\+/g, ' ')),
+            value: v !== undefined ? decodeURIComponent(v.replace(/\+/g, ' ')) : ''
+          });
+        }
+      });
+    } else {
+      bodyType = 'raw';
+      rawBody = rawData;
+    }
+  }
+
+  if (!method) {
+    if (bodyType !== 'none' || dataParts.length > 0 || formData.length > 0 || urlEncoded.length > 0) {
+      method = 'POST';
+    } else {
+      method = 'GET';
+    }
+  }
+
+  if (url) {
+    url = url.replace(/^['"]|['"]$/g, '');
+    try {
+      const dummyBase = 'https://dummy.local';
+      const u = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : `${dummyBase}/${url}`);
+      u.searchParams.forEach((val, key) => {
+        params.push({ enabled: true, key, value: val, desc: '' });
+      });
+    } catch {
+    }
+  }
+
+  return {
+    method,
+    url,
+    headers,
+    params,
+    bodyType,
+    jsonBody,
+    rawBody,
+    formData,
+    urlEncoded,
+    basicAuth
+  };
+}
+
+function applyCurlCommand(rawText) {
+  const parsed = parseCurlCommand(rawText);
+  if (!parsed) return false;
+
+  state.method = parsed.method || 'GET';
+  el.methodSelect.value = state.method;
+  syncMethodColor();
+
+  state.url = parsed.url || '';
+  el.urlInput.value = parsed.url || '';
+
+  if (parsed.url) {
+    try {
+      const u = new URL(parsed.url.startsWith('http') ? parsed.url : `https://${parsed.url}`);
+      const cleanPath = u.pathname.length > 1 ? u.pathname : u.hostname;
+      if (!state.name || state.name === 'Untitled Request' || state.name === 'Get Post 1') {
+        state.name = `${state.method} ${cleanPath}`;
+        el.reqTitle.value = state.name;
+      }
+    } catch {
+    }
+  }
+
+  state.headers = parsed.headers ? JSON.parse(JSON.stringify(parsed.headers)) : [];
+  renderHeaders();
+
+  state.params = parsed.params ? JSON.parse(JSON.stringify(parsed.params)) : [];
+  renderParams();
+
+  state.formData = parsed.formData ? JSON.parse(JSON.stringify(parsed.formData)) : [];
+  renderFormData();
+
+  state.urlEncoded = parsed.urlEncoded ? JSON.parse(JSON.stringify(parsed.urlEncoded)) : [];
+  renderUrlEncoded();
+
+  state.bodyType = parsed.bodyType || 'none';
+  const radio = document.querySelector(`input[name="body-type"][value="${state.bodyType}"]`);
+  if (radio) radio.checked = true;
+  setBodyType(state.bodyType);
+
+  if (state.bodyType === 'json') {
+    state.jsonBody = parsed.jsonBody || '';
+    el.jsonEditor.value = state.jsonBody;
+  } else if (state.bodyType === 'raw') {
+    state.rawBody = parsed.rawBody || '';
+    el.rawEditor.value = state.rawBody;
+  } else {
+    state.jsonBody = '';
+    el.jsonEditor.value = '';
+    state.rawBody = '';
+    el.rawEditor.value = '';
+  }
+
+  if (parsed.basicAuth) {
+    state.auth.type = 'basic';
+    state.auth.username = parsed.basicAuth.username || '';
+    state.auth.password = parsed.basicAuth.password || '';
+    el.authType.value = 'basic';
+    el.authUsername.value = state.auth.username;
+    el.authPassword.value = state.auth.password;
+    el.authBasicFields.classList.remove('hidden');
+    el.authBearerFields.classList.add('hidden');
+    el.authApikeyFields.classList.add('hidden');
+  }
+
+  updateBadges();
+
+  if (state.bodyType !== 'none') {
+    const tabBtn = document.querySelector('.request-panel .tab-btn[data-tab="tab-body"]');
+    if (tabBtn) tabBtn.click();
+  } else if (state.params.length > 0) {
+    const tabBtn = document.querySelector('.request-panel .tab-btn[data-tab="tab-params"]');
+    if (tabBtn) tabBtn.click();
+  } else if (state.headers.length > 0) {
+    const tabBtn = document.querySelector('.request-panel .tab-btn[data-tab="tab-headers"]');
+    if (tabBtn) tabBtn.click();
+  }
+
+  showToast('Đã import cURL thành công');
+  return true;
+}
+
+function generateCurlCommand() {
+  const reqData = prepareRequestPayload();
+  const parts = ['curl'];
+
+  if (reqData.method !== 'GET') {
+    parts.push(`-X ${reqData.method}`);
+  }
+
+  parts.push(`'${reqData.url || 'https://'}'`);
+
+  for (const [key, val] of Object.entries(reqData.headers)) {
+    parts.push(`-H '${key}: ${String(val).replace(/'/g, "'\\''")}'`);
+  }
+
+  if (reqData.body && !['GET', 'HEAD'].includes(reqData.method)) {
+    parts.push(`-d '${String(reqData.body).replace(/'/g, "'\\''")}'`);
+  }
+
+  return parts.join(' \\\n  ');
 }
 
 function setBodyType(type) {
